@@ -238,8 +238,9 @@ namespace MemoryProfilerWindow
                 return;
             }
 
+            int cnt = Math.Min(elementCount, 100);
             var pointers = new List<UInt64>();
-            for (int i = 0; i != elementCount; i++)
+            for (int i = 0; i != cnt; i++)
             {
                 pointers.Add(_primitiveValueReader.ReadPointer(managedObject.address + (UInt64)_unpackedCrawl.virtualMachineInformation.arrayHeaderSize + (UInt64)(i * _unpackedCrawl.virtualMachineInformation.pointerSize)));
             }
@@ -399,7 +400,8 @@ namespace MemoryProfilerWindow
                 if (managedObject != null && managedObject.typeDescription.name == "System.String")
                     caption = StringTools.ReadString(_unpackedCrawl.managedHeap.Find(managedObject.address, _unpackedCrawl.virtualMachineInformation), _unpackedCrawl.virtualMachineInformation);
 
-                if (GUILayout.Button(caption))
+                int size = Math.Min(caption.Length, 4096);
+                if (GUILayout.Button(caption.Substring(0, size)))
                     _hostWindow.SelectThing(rb);
                 EditorGUI.EndDisabledGroup();
             }

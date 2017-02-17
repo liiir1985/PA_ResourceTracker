@@ -85,10 +85,156 @@ public static class TrackerModeUtil
             string fullName = Path.Combine(binFilePath, binFileName);
             if (!File.Exists(fullName))
             {
-                System.Runtime.Serialization.Formatters.Binary.BinaryFormatter bf = new System.Runtime.Serialization.Formatters.Binary.BinaryFormatter();
                 using (Stream stream = File.Open(fullName, FileMode.Create))
                 {
-                    bf.Serialize(stream, packed);
+                    BinaryWriter bw = new BinaryWriter(stream);
+                    bw.Write(System.Text.Encoding.ASCII.GetBytes("MEMSNAP\0"));
+                    bw.Write(packed.connections.Length);
+                    var connctions = packed.connections;
+                    MemUtil.LoadSnapshotProgress(0, "Saving Connection");
+                    float prog = 0;
+                    float lastProg = 0;
+
+                    var len = connctions.Length;
+                    bw.Write(len);
+
+                    for (int i = 0; i < len; i++)
+                    {
+                        var c = connctions[i];
+                        bw.Write(c.from);
+                        bw.Write(c.to);
+                        prog = ((float)i / len) * 0.15f;
+                        if (prog - lastProg > 0.01)
+                        {
+                            MemUtil.LoadSnapshotProgress(prog, string.Format("Saving Connction {0}/{1}", i + 1, len));
+                            lastProg = prog;
+                        }
+                    }
+
+                    var handles = packed.gcHandles;
+                    len = handles.Length;
+                    bw.Write(len);
+
+                    for (int i = 0; i < len; i++)
+                    {
+                        var h = handles[i];
+                        bw.Write(h.target);
+
+                        prog = 0.15f + ((float)i / len) * 0.15f;
+                        if (prog - lastProg > 0.01)
+                        {
+                            MemUtil.LoadSnapshotProgress(prog, string.Format("Saving GCHandles {0}/{1}", i + 1, len));
+                            lastProg = prog;
+                        }
+                    }
+
+                    var managedHeap = packed.managedHeapSections;
+                    len = managedHeap.Length;
+                    for (int i = 0; i < len; i++)
+                    {
+                        var h = managedHeap[i];
+                        bw.Write(h.bytes.Length);
+                        bw.Write(h.bytes);
+                        bw.Write(h.startAddress);
+
+                        prog = 0.3f + ((float)i / len) * 0.15f;
+                        if (prog - lastProg > 0.01)
+                        {
+                            MemUtil.LoadSnapshotProgress(prog, string.Format("Saving Managed Heap {0}/{1}", i + 1, len));
+                            lastProg = prog;
+                        }
+                    }
+
+                    var nativeObj = packed.nativeObjects;
+                    len = nativeObj.Length;
+
+                    for (int i = 0; i < len; i++)
+                    {
+                        var obj = nativeObj[i];
+                        bw.Write(obj.classId);
+                        bw.Write((byte)obj.hideFlags);
+                        bw.Write(obj.instanceId);
+                        bw.Write(obj.isDontDestroyOnLoad);
+                        bw.Write(obj.isManager);
+                        bw.Write(obj.isPersistent);
+                        bw.Write(!string.IsNullOrEmpty(obj.name));
+                        if (!string.IsNullOrEmpty(obj.name))
+                            bw.Write(obj.name);
+                        bw.Write(obj.nativeObjectAddress);
+                        bw.Write(obj.size);
+
+                        prog = 0.45f + ((float)i / len) * 0.15f;
+                        if (prog - lastProg > 0.01)
+                        {
+                            MemUtil.LoadSnapshotProgress(prog, string.Format("Saving Native Objects {0}/{1}", i + 1, len));
+                            lastProg = prog;
+                        }
+                    }
+
+                    var nativeTypes = packed.nativeTypes;
+                    len = nativeTypes.Length;
+
+                    for (int i = 0; i < len; i++)
+                    {
+                        var t = nativeTypes[i];
+                        bw.Write(t.baseClassId);
+                        bw.Write(!string.IsNullOrEmpty(t.name));
+                        if (!string.IsNullOrEmpty(t.name))
+                            bw.Write(t.name);
+
+                        prog = 0.6f + ((float)i / len) * 0.15f;
+                        if (prog - lastProg > 0.01)
+                        {
+                            MemUtil.LoadSnapshotProgress(prog, string.Format("Saving Native Types {0}/{1}", i + 1, len));
+                            lastProg = prog;
+                        }
+                    }
+
+                    var typeDesc = packed.typeDescriptions;
+                    len = typeDesc.Length;
+
+                    for (int i = 0; i < len; i++)
+                    {
+                        var t = typeDesc[i];
+                        bw.Write(t.arrayRank);
+                        bw.Write(t.assembly);
+                        bw.Write(t.baseOrElementTypeIndex);
+                        var fields = t.fields;
+                        bw.Write(fields.Length);
+                        for (int j = 0; j < fields.Length; j++)
+                        {
+                            var f = fields[j];
+                            bw.Write(f.isStatic);
+                            bw.Write(f.name);
+                            bw.Write(f.offset);
+                            bw.Write(f.typeIndex);
+                        }
+                        bw.Write(t.isArray);
+                        bw.Write(t.isValueType);
+                        bw.Write(t.name);
+                        bw.Write(t.size);
+                        bw.Write(t.staticFieldBytes.Length);
+                        bw.Write(t.staticFieldBytes);
+                        bw.Write(t.typeIndex);
+                        bw.Write(t.typeInfoAddress);
+
+                        prog = 0.75f + ((float)i / len) * 0.15f;
+                        if (prog - lastProg > 0.01)
+                        {
+                            MemUtil.LoadSnapshotProgress(prog, string.Format("Saving Type Definitions {0}/{1}", i + 1, len));
+                            lastProg = prog;
+                        }
+                    }
+
+                    bw.Write(packed.virtualMachineInformation.allocationGranularity);
+                    bw.Write(packed.virtualMachineInformation.arrayBoundsOffsetInHeader);
+                    bw.Write(packed.virtualMachineInformation.arrayHeaderSize);
+                    bw.Write(packed.virtualMachineInformation.arraySizeOffsetInHeader);
+                    bw.Write(packed.virtualMachineInformation.heapFormatVersion);
+                    bw.Write(packed.virtualMachineInformation.objectHeaderSize);
+                    bw.Write(packed.virtualMachineInformation.pointerSize);
+                    MemUtil.LoadSnapshotProgress(1f, "done");
+
                 }
             }
             return true;

@@ -8,6 +8,7 @@ using UnityEngine;
 
 public class TrackerMode_Base
 {
+    public PackedMemorySnapshot SelectedPacked { get { return _selected != PAEditorConst.BAD_ID ? GetPackedAt(_selected) : null; } }
     public CrawledMemorySnapshot Selected { get { return _selected != PAEditorConst.BAD_ID ? GetAt(_selected) : null; } }
     public CrawledMemorySnapshot Diff_1st { get { return _1st != PAEditorConst.BAD_ID ? GetAt(_1st) : null; } }
     public CrawledMemorySnapshot Diff_2nd { get { return _2nd != PAEditorConst.BAD_ID ? GetAt(_2nd) : null; } }
@@ -105,6 +106,18 @@ public class TrackerMode_Base
         if (i >= 0 && i < _snapshots.Count)
         {
             unpacked = _snapshots[i].Unpacked;
+        }
+
+        return unpacked;
+    }
+
+    protected PackedMemorySnapshot GetPackedAt(int i)
+    {
+        PackedMemorySnapshot unpacked = null;
+
+        if (i >= 0 && i < _snapshots.Count)
+        {
+            unpacked = _snapshots[i].Packed;
         }
 
         return unpacked;

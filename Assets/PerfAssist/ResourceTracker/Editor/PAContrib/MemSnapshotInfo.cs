@@ -8,7 +8,9 @@ using UnityEditor.MemoryProfiler;
 public class MemSnapshotInfo 
 {
     public CrawledMemorySnapshot Unpacked { get { return _unpacked; } }
+    public PackedMemorySnapshot Packed { get { return packed; } }
     private CrawledMemorySnapshot _unpacked = null;
+    PackedMemorySnapshot packed = null;
 
     public int TotalCount { get { return _totalCount; } }
     public int _totalCount = 0;
@@ -20,7 +22,7 @@ public class MemSnapshotInfo
     {
         _totalCount = 0;
         _totalSize = 0;
-
+        this.packed = packed;
         try
         {
             MemUtil.LoadSnapshotProgress(0.01f, "crawling");

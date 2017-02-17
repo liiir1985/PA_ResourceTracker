@@ -75,6 +75,15 @@ public class TrackerModeManager : TrackerModeOwner
                 }
             }
 
+            if (GUILayout.Button("Save Session", MemStyles.ToolbarButton, GUILayout.MaxWidth(100)))
+            {
+                TrackerMode_Base mode = GetCurrentMode();
+                if (mode != null)
+                {
+                    mode.SaveSessionInfo(mode.SelectedPacked, mode.Selected);
+                }
+            }
+
             if (GUILayout.Button("Clear Session", MemStyles.ToolbarButton, GUILayout.MaxWidth(100)))
             {
                 TrackerMode_Base mode = GetCurrentMode();
