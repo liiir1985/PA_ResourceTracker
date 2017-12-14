@@ -1,7 +1,6 @@
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
-using UnityEngine.SceneManagement;
 
 public class Planter : MonoBehaviour {
 
@@ -48,7 +47,6 @@ public class Planter : MonoBehaviour {
         {
             Resources.UnloadUnusedAssets();
         }
-
         GUILayout.EndVertical();
     }
 

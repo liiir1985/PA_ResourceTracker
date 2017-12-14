@@ -1,4 +1,5 @@
 using System;
+using Assets.Editor.Treemap;
 using UnityEditor;
 using UnityEngine;
 using UnityEditor.MemoryProfiler;
@@ -24,8 +25,6 @@ namespace MemoryProfilerWindow
         private float _textureSize = 128.0f;
 
         MemObjHistory Instance = new MemObjHistory();
-        //public event SysPost.StdMulticastDelegation RefreshCallStack;
-
 
         static class Styles
         {
@@ -38,9 +37,7 @@ namespace MemoryProfilerWindow
         private Texture2D _textureBack;
         private Texture2D _textureForward;
 
-        public  string _stackInfo = "";
-
-        public Inspector(MemoryProfilerWindow hostWindow, CrawledMemorySnapshot unpackedCrawl)
+        public Inspector(MemoryProfilerWindow hostWindow, CrawledMemorySnapshot unpackedCrawl, PackedMemorySnapshot snapshot)
         {
             _unpackedCrawl = unpackedCrawl;
             _hostWindow = hostWindow;
@@ -56,14 +53,13 @@ namespace MemoryProfilerWindow
             _selectedThing = thing;
             _shortestPath = _shortestPathToRootFinder.FindFor(thing);
             Instance.OnObjSelected(thing);
-
-            //if (NetManager.Instance != null && NetManager.Instance.IsConnected)
-            //    requestStackDataInfo();
         }
 
         public void Draw()
         {
             float NavAreaHeight = 40.0f;
+            if (_hostWindow.EnhancedMode)
+            {
                 GUILayout.BeginArea(new Rect(_hostWindow.position.width - MemConst.InspectorWidth,
                     MemConst.TopBarHeight, MemConst.InspectorWidth, NavAreaHeight));
 
@@ -87,13 +83,14 @@ namespace MemoryProfilerWindow
                         _hostWindow.SelectThing(next);
                 }
                 GUI.enabled = true;
-
+                
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
 
                 GUILayout.EndArea();
+            }
 
-            float topSpace = MemConst.TopBarHeight + NavAreaHeight;
+            float topSpace = MemConst.TopBarHeight + (_hostWindow.EnhancedMode ? NavAreaHeight : 0);
             GUILayout.BeginArea(new Rect(_hostWindow.position.width - MemConst.InspectorWidth, topSpace, MemConst.InspectorWidth, _hostWindow.position.height - topSpace));
             _scrollPosition = GUILayout.BeginScrollView(_scrollPosition);
 
@@ -149,7 +146,7 @@ namespace MemoryProfilerWindow
                     GUILayout.Label("Of type: " + staticFields.typeDescription.name);
                     GUILayout.Label("size: " + staticFields.size);
 
-                    DrawFields(staticFields.typeDescription, new BytesAndOffset() { bytes = staticFields.typeDescription.staticFieldBytes, offset = 0, pointerSize = _unpackedCrawl.virtualMachineInformation.pointerSize }, true);
+                    DrawFields(staticFields.typeDescription, new BytesAndOffset() { bytes = staticFields.typeDescription.staticFieldBytes, offset = 0, pointerSize = _unpackedCrawl.virtualMachineInformation.pointerSize}, true);
                 }
 
                 if (managedObject == null)
@@ -186,9 +183,7 @@ namespace MemoryProfilerWindow
                 }
             }
 
-            //if (NetManager.Instance == null || !NetManager.Instance.IsConnected)
-            //    _stackInfo = GetNativeDebugInfo();
-            //GUILayout.TextArea(_stackInfo, GUILayout.MinHeight(300f));
+            GUILayout.TextArea(GetSelectedDebugInfo(), GUILayout.MinHeight(300f));
 
             GUILayout.EndScrollView();
             GUILayout.EndArea();
@@ -210,7 +205,7 @@ namespace MemoryProfilerWindow
             if (_textureObject != null)
             {
                 EditorGUILayout.LabelField("textureInfo: " + _textureObject.width + "x" + _textureObject.height + " " + _textureObject.format);
-                EditorGUILayout.ObjectField(_textureObject, typeof(Texture2D), false);
+                EditorGUILayout.ObjectField(_textureObject, typeof(Texture2D));
                 _textureSize = EditorGUILayout.Slider(_textureSize, 100.0f, 1024.0f);
                 GUILayout.Label(_textureObject, GUILayout.Width(_textureSize), GUILayout.Height(_textureSize * _textureObject.height / _textureObject.width));
             }
@@ -251,6 +246,7 @@ namespace MemoryProfilerWindow
         private void DrawFields(TypeDescription typeDescription, BytesAndOffset bytesAndOffset, bool useStatics = false)
         {
             int counter = 0;
+        
             foreach (var field in TypeTools.AllFieldsOf(typeDescription, _unpackedCrawl.typeDescriptions, useStatics ? TypeTools.FieldFindOptions.OnlyStatic : TypeTools.FieldFindOptions.OnlyInstance))
             {
                 counter++;
@@ -280,75 +276,68 @@ namespace MemoryProfilerWindow
         {
             var typeDescription = _unpackedCrawl.typeDescriptions[field.typeIndex];
 
-            try
+            switch (typeDescription.name)
             {
-                switch (typeDescription.name)
-                {
-                    case "System.Int32":
-                        GUILayout.Label(_primitiveValueReader.ReadInt32(bytesAndOffset).ToString());
-                        break;
-                    case "System.Int64":
-                        GUILayout.Label(_primitiveValueReader.ReadInt64(bytesAndOffset).ToString());
-                        break;
-                    case "System.UInt32":
-                        GUILayout.Label(_primitiveValueReader.ReadUInt32(bytesAndOffset).ToString());
-                        break;
-                    case "System.UInt64":
-                        GUILayout.Label(_primitiveValueReader.ReadUInt64(bytesAndOffset).ToString());
-                        break;
-                    case "System.Int16":
-                        GUILayout.Label(_primitiveValueReader.ReadInt16(bytesAndOffset).ToString());
-                        break;
-                    case "System.UInt16":
-                        GUILayout.Label(_primitiveValueReader.ReadUInt16(bytesAndOffset).ToString());
-                        break;
-                    case "System.Byte":
-                        GUILayout.Label(_primitiveValueReader.ReadByte(bytesAndOffset).ToString());
-                        break;
-                    case "System.SByte":
-                        GUILayout.Label(_primitiveValueReader.ReadSByte(bytesAndOffset).ToString());
-                        break;
-                    case "System.Char":
-                        GUILayout.Label(_primitiveValueReader.ReadChar(bytesAndOffset).ToString());
-                        break;
-                    case "System.Boolean":
-                        GUILayout.Label(_primitiveValueReader.ReadBool(bytesAndOffset).ToString());
-                        break;
-                    case "System.Single":
-                        GUILayout.Label(_primitiveValueReader.ReadSingle(bytesAndOffset).ToString());
-                        break;
-                    case "System.Double":
-                        GUILayout.Label(_primitiveValueReader.ReadDouble(bytesAndOffset).ToString());
-                        break;
-                    case "System.IntPtr":
-                        GUILayout.Label(_primitiveValueReader.ReadPointer(bytesAndOffset).ToString("X"));
-                        break;
-                    default:
-                        if (!typeDescription.isValueType)
+                case "System.Int32":
+                    GUILayout.Label(_primitiveValueReader.ReadInt32(bytesAndOffset).ToString());
+                    break;
+                case "System.Int64":
+                    GUILayout.Label(_primitiveValueReader.ReadInt64(bytesAndOffset).ToString());
+                    break;
+                case "System.UInt32":
+                    GUILayout.Label(_primitiveValueReader.ReadUInt32(bytesAndOffset).ToString());
+                    break;
+                case "System.UInt64":
+                    GUILayout.Label(_primitiveValueReader.ReadUInt64(bytesAndOffset).ToString());
+                    break;
+                case "System.Int16":
+                    GUILayout.Label(_primitiveValueReader.ReadInt16(bytesAndOffset).ToString());
+                    break;
+                case "System.UInt16":
+                    GUILayout.Label(_primitiveValueReader.ReadUInt16(bytesAndOffset).ToString());
+                    break;
+                case "System.Byte":
+                    GUILayout.Label(_primitiveValueReader.ReadByte(bytesAndOffset).ToString());
+                    break;
+                case "System.SByte":
+                    GUILayout.Label(_primitiveValueReader.ReadSByte(bytesAndOffset).ToString());
+                    break;
+                case "System.Char":
+                    GUILayout.Label(_primitiveValueReader.ReadChar(bytesAndOffset).ToString());
+                    break;
+                case "System.Boolean":
+                    GUILayout.Label(_primitiveValueReader.ReadBool(bytesAndOffset).ToString());
+                    break;
+                case "System.Single":
+                    GUILayout.Label(_primitiveValueReader.ReadSingle(bytesAndOffset).ToString());
+                    break;
+                case "System.Double":
+                    GUILayout.Label(_primitiveValueReader.ReadDouble(bytesAndOffset).ToString());
+                    break;
+                case "System.IntPtr":
+                    GUILayout.Label(_primitiveValueReader.ReadPointer(bytesAndOffset).ToString("X"));
+                    break;
+                default:
+
+                    if (!typeDescription.isValueType)
+                    {
+                        ThingInMemory item = GetThingAt(bytesAndOffset.ReadPointer());
+                        if (item == null)
                         {
-                            ThingInMemory item = GetThingAt(bytesAndOffset.ReadPointer());
-                            if (item == null)
-                            {
-                                EditorGUI.BeginDisabledGroup(true);
-                                GUILayout.Button("Null");
-                                EditorGUI.EndDisabledGroup();
-                            }
-                            else
-                            {
-                                DrawLinks(new ThingInMemory[] { item });
-                            }
+                            EditorGUI.BeginDisabledGroup(true);
+                            GUILayout.Button("Null");
+                            EditorGUI.EndDisabledGroup();
                         }
                         else
                         {
-                        DrawFields(typeDescription, bytesAndOffset);
+                            DrawLinks(new ThingInMemory[] { item });
                         }
-                        break;
-                }
-            }
-            catch (Exception ex)
-            {
-                GUILayout.Label(string.Format("<bad_entry> type: {0}, len: {1}, offset: {2}, ex: {3}", typeDescription.name, bytesAndOffset.bytes.Length, bytesAndOffset.offset, ex.GetType().Name));
-                Debug.LogFormat("<bad_entry> type: {0}, len: {1}, offset: {2}, ex: {3}", typeDescription.name, bytesAndOffset.bytes.Length, bytesAndOffset.offset, ex.GetType().Name);
+                    }
+                    else
+                    {
+                        DrawFields(typeDescription, bytesAndOffset);
+                    }
+                    break;
             }
         }
 
@@ -377,7 +366,6 @@ namespace MemoryProfilerWindow
                         return false;
                     });
         }*/
-
 
         private void DrawLinks(IEnumerable<UInt64> pointers)
         {
@@ -424,35 +412,17 @@ namespace MemoryProfilerWindow
             throw new ArgumentException("Unexpected type: " + rb.GetType());
         }
 
-        private string GetNativeDebugInfo()
+        private string GetSelectedDebugInfo()
         {
             var obj = _selectedThing as NativeUnityEngineObject;
             if (obj == null || ResourceTracker.Instance == null || !ResourceTracker.Instance.EnableTracking)
                 return "";
 
-            ResourceRequestInfo requestInfo = ResourceTracker.Instance.GetAllocInfo(obj.instanceID);
+            ResourceRequestInfo requestInfo = ResourceTracker.Instance.GetAllocInfo(obj.instanceID, obj.className);
             if (requestInfo == null)
                 return "";
 
             return string.Format("{0}\n\nStackTrace:\n{1}", requestInfo.ToString(), ResourceTracker.Instance.GetStackTrace(requestInfo));
-        }
-
-        private void requestStackDataInfo()
-        {
-            var selectNat = _selectedThing as NativeUnityEngineObject;
-            if (selectNat == null)
-                return;
-            UsCmd cmd = new UsCmd();
-            cmd.WriteInt16((short)eNetCmd.CL_RequestStackData);
-            cmd.WriteInt32(selectNat.instanceID);
-            cmd.WriteString(getRemoveDiffTypeStr(selectNat));
-            NetManager.Instance.Send(cmd);
-        }
-
-        private string getRemoveDiffTypeStr(NativeUnityEngineObject things)
-        {
-            return things.className.Replace(sDiffType.AdditiveType, "").Replace(sDiffType.ModificationType, "").
-                Replace(sDiffType.NegativeType, "");
         }
     }
 }

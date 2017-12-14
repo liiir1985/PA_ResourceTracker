@@ -73,7 +73,7 @@ namespace MemoryProfilerWindow
             return ReadPointer(_heapSections.Find(address, _virtualMachineInformation));
         }
 
-        public Char ReadChar(BytesAndOffset bytesAndOffset)
+        public char ReadChar(BytesAndOffset bytesAndOffset)
         {
             return System.Text.Encoding.Unicode.GetChars(bytesAndOffset.bytes, bytesAndOffset.offset, 2)[0];
         }
