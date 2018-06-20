@@ -30,18 +30,22 @@ namespace MemoryProfilerWindow
             MemUtil.LoadSnapshotProgress(0.2f, "CrawlPointer");
             for (int i = 0; i != input.gcHandles.Length; i++)
             {
-                CrawlPointer(input, result.startIndices, input.gcHandles[i].target, result.startIndices.OfFirstGCHandle + i, connections, managedObjects, 0);
-                MemUtil.LoadSnapshotProgress(0.2f + 0.2f * ((float)i / (float)input.gcHandles.Length), 
-                    string.Format("CrawlPointer({0}/{1})", i, input.gcHandles.Length));
+                CrawlPointer(input, result.startIndices, input.gcHandles[i].target, result.startIndices.OfFirstGCHandle + i, connections, managedObjects);
+                
+                if (i % 5 == 0)
+                    MemUtil.LoadSnapshotProgress(0.2f + 0.2f * ((float)i / (float)input.gcHandles.Length), 
+                        string.Format("CrawlPointer({0}/{1})", i, input.gcHandles.Length));
             }
 
             MemUtil.LoadSnapshotProgress(0.4f, "CrawlRawObjectData");
             for (int i = 0; i < result.typesWithStaticFields.Length; i++)
             {
                 var typeDescription = result.typesWithStaticFields[i];
-                CrawlRawObjectData(input, result.startIndices, new BytesAndOffset {bytes = typeDescription.staticFieldBytes, offset = 0, pointerSize = _virtualMachineInformation.pointerSize}, typeDescription, true, result.startIndices.OfFirstStaticFields + i, connections, managedObjects, 0);
-                MemUtil.LoadSnapshotProgress(0.4f + 0.2f * ((float)i / (float)result.typesWithStaticFields.Length),
-                    string.Format("CrawlRawObjectData({0}/{1})", i, result.typesWithStaticFields.Length));
+                CrawlRawObjectData(input, result.startIndices, new BytesAndOffset {bytes = typeDescription.staticFieldBytes, offset = 0, pointerSize = _virtualMachineInformation.pointerSize}, typeDescription, true, result.startIndices.OfFirstStaticFields + i, connections, managedObjects);
+
+                if (i % 5 == 0)
+                    MemUtil.LoadSnapshotProgress(0.4f + 0.2f * ((float)i / (float)result.typesWithStaticFields.Length),
+                        string.Format("CrawlRawObjectData({0}/{1})", i, result.typesWithStaticFields.Length));
             }
 
             MemUtil.LoadSnapshotProgress(0.6f, "composing result");
@@ -125,68 +129,53 @@ namespace MemoryProfilerWindow
             return typeInfoAddress;
         }
 
-        private void CrawlRawObjectData(PackedMemorySnapshot packedMemorySnapshot, StartIndices startIndices, BytesAndOffset bytesAndOffset, TypeDescription typeDescription, bool useStaticFields, int indexOfFrom, List<Connection>  out_connections, List<PackedManagedObject> out_managedObjects, int depth)
+        private void CrawlRawObjectData(PackedMemorySnapshot packedMemorySnapshot, StartIndices startIndices, BytesAndOffset bytesAndOffset, TypeDescription typeDescription, bool useStaticFields, int indexOfFrom, List<Connection>  out_connections, List<PackedManagedObject> out_managedObjects)
         {
-            if (depth > 100)
+            foreach (var field in TypeTools.AllFieldsOf(typeDescription, _typeDescriptions, useStaticFields ? TypeTools.FieldFindOptions.OnlyStatic : TypeTools.FieldFindOptions.OnlyInstance))
             {
-                return;
-            }
-            else
-            {
-
-                foreach (var field in TypeTools.AllFieldsOf(typeDescription, _typeDescriptions, useStaticFields
-                                ? TypeTools.FieldFindOptions.OnlyStatic
-                                : TypeTools.FieldFindOptions.OnlyInstance))
+                if (field.typeIndex == typeDescription.typeIndex && typeDescription.isValueType)
                 {
-                    if (field.typeIndex == typeDescription.typeIndex && typeDescription.isValueType)
-                    {
-                        //this happens in System.Single, which is a weird type that has a field of its own type.
-                        continue;
-                    }
+                    //this happens in System.Single, which is a weird type that has a field of its own type.
+                    continue;
+                }
 
-                    if (field.offset == -1)
-                    {
-                        //this is how we encode TLS fields. todo: actually treat TLS fields as roots
-                        continue;
-                    }
+                if (field.offset == -1)
+                {
+                    //this is how we encode TLS fields. todo: actually treat TLS fields as roots
+                    continue;
+                }
 
-                    var fieldType = packedMemorySnapshot.typeDescriptions[field.typeIndex];
+                var fieldType = packedMemorySnapshot.typeDescriptions[field.typeIndex];
 
-                    var fieldLocation =
-                        bytesAndOffset.Add(field.offset -
-                                           (useStaticFields ? 0 : _virtualMachineInformation.objectHeaderSize));
+                var fieldLocation = bytesAndOffset.Add(field.offset - (useStaticFields ? 0 : _virtualMachineInformation.objectHeaderSize));
 
-                    if (fieldType.isValueType)
-                    {
-                        CrawlRawObjectData(packedMemorySnapshot, startIndices, fieldLocation, fieldType, false,
-                            indexOfFrom, out_connections, out_managedObjects, depth + 1);
-                        continue;
-                    }
+                if (fieldType.isValueType)
+                {
+                    CrawlRawObjectData(packedMemorySnapshot, startIndices, fieldLocation, fieldType, false, indexOfFrom, out_connections, out_managedObjects);
+                    continue;
+                }
 
-                    //temporary workaround for a bug in 5.3b4 and earlier where we would get literals returned as fields with offset 0. soon we'll be able to remove this code.
-                    bool gotException = false;
-                    try
-                    {
-                        fieldLocation.ReadPointer();
-                    }
-                    catch (ArgumentException)
-                    {
-                        UnityEngine.Debug.LogWarningFormat("Skipping field {0} on type {1}", field.name,
-                            typeDescription.name);
-                        UnityEngine.Debug.LogWarningFormat("FieldType.name: {0}", fieldType.name);
-                        gotException = true;
-                    }
+                //temporary workaround for a bug in 5.3b4 and earlier where we would get literals returned as fields with offset 0. soon we'll be able to remove this code.
+                bool gotException = false;
+                try
+                {
+                    fieldLocation.ReadPointer();
+                }
+                catch (ArgumentException)
+                {
+                    UnityEngine.Debug.LogWarningFormat("Skipping field {0} on type {1}", field.name, typeDescription.name);
+                    UnityEngine.Debug.LogWarningFormat("FieldType.name: {0}", fieldType.name);
+                    gotException = true;
+                }
 
-                    if (!gotException)
-                    {
-                        CrawlPointer(packedMemorySnapshot, startIndices, fieldLocation.ReadPointer(), indexOfFrom,
-                            out_connections, out_managedObjects, depth);
-                    }
+                if (!gotException)
+                {
+                    CrawlPointer(packedMemorySnapshot, startIndices, fieldLocation.ReadPointer(), indexOfFrom, out_connections, out_managedObjects);
                 }
             }
         }
 
-        private void CrawlPointer(PackedMemorySnapshot packedMemorySnapshot, StartIndices startIndices, ulong pointer, int indexOfFrom, List<Connection> out_connections, List<PackedManagedObject> out_managedObjects, int depth)
+        private void CrawlPointer(PackedMemorySnapshot packedMemorySnapshot, StartIndices startIndices, ulong pointer, int indexOfFrom, List<Connection> out_connections, List<PackedManagedObject> out_managedObjects)
         {
             var bo = packedMemorySnapshot.managedHeapSections.Find(pointer, _virtualMachineInformation);
             if (!bo.IsValid)
@@ -214,7 +203,7 @@ namespace MemoryProfilerWindow
 
             if (!typeDescription.isArray)
             {
-                CrawlRawObjectData(packedMemorySnapshot, startIndices, bo.Add(_virtualMachineInformation.objectHeaderSize), typeDescription, false, indexOfObject, out_connections, out_managedObjects, depth + 1);
+                CrawlRawObjectData(packedMemorySnapshot, startIndices, bo.Add(_virtualMachineInformation.objectHeaderSize), typeDescription, false, indexOfObject, out_connections, out_managedObjects);
                 return;
             }
 
@@ -225,12 +214,12 @@ namespace MemoryProfilerWindow
             {
                 if (elementType.isValueType)
                 {
-                    CrawlRawObjectData(packedMemorySnapshot, startIndices, cursor, elementType, false, indexOfObject, out_connections, out_managedObjects, depth + 1);
+                    CrawlRawObjectData(packedMemorySnapshot, startIndices, cursor, elementType, false, indexOfObject, out_connections, out_managedObjects);
                     cursor = cursor.Add(elementType.size);
                 }
                 else
                 {
-                    CrawlPointer(packedMemorySnapshot, startIndices, cursor.ReadPointer(), indexOfObject, out_connections, out_managedObjects, depth + 1);
+                    CrawlPointer(packedMemorySnapshot, startIndices, cursor.ReadPointer(), indexOfObject, out_connections, out_managedObjects);
                     cursor = cursor.NextPointer();
                 }
             }

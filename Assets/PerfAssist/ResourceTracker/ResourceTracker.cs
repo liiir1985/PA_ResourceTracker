@@ -1,10 +1,8 @@
-﻿using UnityEngine;
-using System.Collections;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
 using System.Diagnostics;
+using System.IO;
+using UnityEngine;
 
 public enum ResourceRequestType
 {
@@ -29,7 +27,7 @@ public class ResourceRequestInfo
 
     public int stacktraceHash = 0;
 
-    public string ToString()
+    public override string ToString()
     {
         return string.Format("#{0} ({1:0.000}) {2} {3} {4} +{5} +{6} ({7})",
             seqID, requestTime, rootID, resourceType.ToString(), 
@@ -49,55 +47,147 @@ public class ResourceTracker : IDisposable
 
     // this boolean is *read-only* after the instance is created
     public bool EnableTracking { get { return _enableTracking; } }
-    private bool _enableTracking = true;    
+    private bool _enableTracking = false;    
 
     private StreamWriter _logWriter = null;
-    private string _logPath = "";
+    //private string _logPath = "";
     private int _reqSeq = 0;
+
+    public Dictionary<string, string> ShaderPropertyDict
+    {
+        get { return _shaderPropertyDict;}
+    }
+    private Dictionary<string, string> _shaderPropertyDict = null;
+
+    private class stackParamater
+    {
+        int instanceID;
+        public int InstanceID
+        {
+            get { return instanceID; }
+            set { instanceID = value; }
+        }
+        int size;
+        public int Size
+        {
+            get { return size; }
+            set { size = value; }
+        }
+    }
+
+    Dictionary<string, List<stackParamater>> _stackUnavailableDict = new Dictionary<string, List<stackParamater>>();
 
     public ResourceTracker(bool enableTracking)
     {
         if (enableTracking)
         {
+            Open();
+
+            if (_enableTracking)
+            {
+                if (UsNet.Instance != null && UsNet.Instance.CmdExecutor != null)
+                {
+                    UsNet.Instance.CmdExecutor.RegisterHandler(eNetCmd.CL_RequestStackData, NetHandle_RequestStackData);
+                    UsNet.Instance.CmdExecutor.RegisterHandler(eNetCmd.CL_RequestStackSummary, NetHandle_RequestStackSummary);
+                }
+                else
+                    UnityEngine.Debug.LogError("UsNet not available");
+
+                readShaderPropertyJson();
+            }
+        }
+    }
+
+    private void readShaderPropertyJson()
+    {
+        if (_shaderPropertyDict == null)
+        {
             try
             {
-                DateTime dt = DateTime.Now;
+                StreamReader sr = new StreamReader(new FileStream(ResourceTrackerConst.shaderPropertyNameJsonPath, FileMode.Open));
+                string jsonStr = sr.ReadToEnd();
+                sr.Close();
+                _shaderPropertyDict = JsonUtility.FromJson<Serialization<string, string>>(jsonStr).ToDictionary();            }
+            catch (System.Exception)
+            {
+                UnityEngine.Debug.Log("no ShaderPropertyNameRecord.json");
+            }
+        }
+    }
 
-                string logFile = string.Format("{0}_{1}_alloc.txt", SysUtil.FormatDateAsFileNameString(dt), SysUtil.FormatTimeAsFileNameString(dt));
-                string logPath = Path.Combine(Application.persistentDataPath, logFile);
 
-                _logWriter = new FileInfo(logPath).CreateText();
-                _logWriter.AutoFlush = true;
-                _logPath = logPath;
+    public void Open()
+    {
+        if (_enableTracking)
+        {
+            UnityEngine.Debug.LogFormat("[ResourceTracker] info: {0} ", "already enabled, ignored.");
+            return;
+        }
+
+        try
+        {
+            string logDir = Path.Combine(Application.persistentDataPath, "mem_logs");
+            if (!Directory.Exists(logDir))
+                Directory.CreateDirectory(logDir);
+
+            DateTime dt = DateTime.Now;
+
+            string logFile = string.Format("{0}_{1}_alloc.txt", SysUtil.FormatDateAsFileNameString(dt), SysUtil.FormatTimeAsFileNameString(dt));
+            string logPath = Path.Combine(logDir, logFile);
+
+            _logWriter = new FileInfo(logPath).CreateText();
+            _logWriter.AutoFlush = true;
+            //_logPath = logPath;
+
+            _enableTracking = true;
+            UnityEngine.Debug.LogFormat("[ResourceTracker] tracking enabled: {0} ", logPath);
+        }
+        catch (Exception ex)
+        {
+            UnityEngine.Debug.LogErrorFormat("[ResourceTracker] Open() failed, error: {0} ", ex.Message);
+
+            if (_logWriter != null)
+            {
+                _logWriter.Close();
+                _logWriter = null;
+            }
+
+            _enableTracking = false;
+            //_logPath = "";
+        }
+    }
+
+    public void Close()
+    {
+        if (_logWriter != null)
+        {
+            try
+            {
+                _logWriter.WriteLine("--------- unfinished request: {0} --------- ", InProgressAsyncObjects.Count);
+                foreach (KeyValuePair<System.Object, ResourceRequestInfo> p in InProgressAsyncObjects)
+                {
+                    _logWriter.WriteLine("  + {0}", p.Value.ToString());
+                }
+                _logWriter.Close();
             }
             catch (Exception ex)
             {
                 UnityEngine.Debug.LogErrorFormat("[ResourceTracker.ctor] error: {0} ", ex.Message);
-
-                if (_logWriter != null)
-                {
-                    _logWriter.Close();
-                    _logWriter = null;
-                }
-
-                _logPath = "";
+            }
+            finally
+            {
+                _logWriter = null;
             }
         }
 
-        _enableTracking = enableTracking;
+        _enableTracking = false;
     }
 
     public void Dispose()
     {
         if (_enableTracking && _logWriter != null)
         {
-            _logWriter.WriteLine("--------- unfinished request: {0} --------- ", InProgressAsyncObjects.Count);
-            foreach (KeyValuePair<System.Object, ResourceRequestInfo> p in InProgressAsyncObjects)
-            {
-                _logWriter.WriteLine("  + {0}", p.Value.ToString());
-            }
-            _logWriter.Close();
-            _logWriter = null;
+            Close();
         }
     }
 
@@ -157,9 +247,6 @@ public class ResourceTracker : IDisposable
             return;
 
         UnityEngine.SceneManagement.Scene scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
-        if (scene == null)
-            return;
-
         GameObject[] roots = scene.GetRootGameObjects();
         for (int i = 0; i < roots.Length; i++)
         {
@@ -179,22 +266,15 @@ public class ResourceTracker : IDisposable
         ExtractObjectResources(instantiated, allocSeqID);
     }
 
-    public ResourceRequestInfo GetAllocInfo(int instID, string className)
+    public ResourceRequestInfo GetAllocInfo(int instID)
     {
         if (!_enableTracking)
             return null;
 
         int allocSeqID = -1;
-        if (className == "GameObject")
-        {
-            if (!TrackedGameObjects.TryGetValue(instID, out allocSeqID))
-                return null;
-        }
-        else if (SceneGraphExtractor.MemCategories.Contains(className))
-        {
-            if (!TrackedMemObjects.TryGetValue(instID, out allocSeqID))
-                return null;
-        }
+
+        if (!TrackedGameObjects.TryGetValue(instID, out allocSeqID) && !TrackedMemObjects.TryGetValue(instID, out allocSeqID))
+            return null;
         
         ResourceRequestInfo requestInfo = null;
         if (!TrackedAllocInfo.TryGetValue(allocSeqID, out requestInfo))
@@ -274,6 +354,129 @@ public class ResourceTracker : IDisposable
             }
         }
     }
+
+    public bool NetHandle_RequestStackSummary(eNetCmd cmd, UsCmd c)
+    {
+        string flag = c.ReadString();
+        if (string.IsNullOrEmpty(flag))
+            return false;
+
+        if(flag.Equals("begin"))
+        {
+            _stackUnavailableDict.Clear();
+            return true;
+        }
+        
+        if(flag.Equals("end"))
+        {
+            UnityEngine.Debug.Log("Stack Category Statistical Information:");
+            //NetUtil.Log("堆栈类型统计信息:");
+            int totalCount = 0;
+            int unavailableTotalCount = 0;
+            int totalSize = 0;
+            int unavailableTotalSize = 0;
+            int categoryCount = c.ReadInt32();
+            for (int i = 0; i < categoryCount;i++)
+            {
+                string category = c.ReadString();
+                List<stackParamater> unavailableList;
+                _stackUnavailableDict.TryGetValue(category, out unavailableList);
+                if (unavailableList != null)
+                {
+                    int CategoryCount = c.ReadInt32();
+                    int CategorySize =  c.ReadInt32();
+                    totalCount += CategoryCount;
+                    totalSize += CategorySize;
+                    unavailableTotalCount += unavailableList.Count;
+                    int categoryTotalSize=0;
+                    foreach (var info in unavailableList)
+                    {
+                        categoryTotalSize += info.Size;
+                    }
+                    unavailableTotalSize += categoryTotalSize;
+                    UnityEngine.Debug.Log(string.Format("[{0} =({1}/{2},{3}/{4})]", category, unavailableList.Count, CategoryCount, ResourceTrackerConst.FormatBytes(categoryTotalSize), ResourceTrackerConst.FormatBytes(CategorySize)));
+                    //NetUtil.Log("【{0} =({1}/{2},{3}/{4})】", category, unavailableList.Count, CategoryCount, ResourceTrackerConst.FormatBytes(categoryTotalSize), ResourceTrackerConst.FormatBytes(CategorySize));
+                }
+            }
+            UnityEngine.Debug.Log(string.Format("[total =({0}/{1},{2}/{3})]", unavailableTotalCount, totalCount, ResourceTrackerConst.FormatBytes(unavailableTotalSize), ResourceTrackerConst.FormatBytes(totalSize)));
+            //NetUtil.Log("【total =({0}/{1},{2}/{3})】", unavailableTotalCount, totalCount, ResourceTrackerConst.FormatBytes(unavailableTotalSize), ResourceTrackerConst.FormatBytes(totalSize));
+            return true;
+        }
+
+        string className = flag;
+        int count = c.ReadInt32();
+        for (int i = 0; i < count; i++)
+        {
+            int instanceID =c.ReadInt32();
+            int size = c.ReadInt32();
+            ResourceRequestInfo requestInfo = ResourceTracker.Instance.GetAllocInfo(instanceID);
+            if (requestInfo == null)
+            {
+                if(!_stackUnavailableDict.ContainsKey(className))
+                {
+                    _stackUnavailableDict.Add(className,new List<stackParamater>());
+                }
+                List<stackParamater> stackUnavailableList;
+                _stackUnavailableDict.TryGetValue(className ,out stackUnavailableList);
+                stackParamater info = new stackParamater();
+                info.InstanceID = instanceID;
+                info.Size = size;
+                stackUnavailableList.Add(info);
+            }
+        }
+        return true;
+    }
+    public List<Texture2D> GetTexture2DObjsFromMaterial(Material mat)
+    {
+        var shaderPropertyDict = ResourceTracker.Instance.ShaderPropertyDict;
+        List<Texture2D> result = new List<Texture2D>();
+        if (mat != null)
+        {
+            Shader shader = mat.shader;
+            if (shader != null && shaderPropertyDict != null && shaderPropertyDict.ContainsKey(shader.name))
+            {
+                string propertyNameStrs;
+                shaderPropertyDict.TryGetValue(shader.name, out propertyNameStrs);
+                char[] tokens = new char[] { ResourceTrackerConst.shaderPropertyNameJsonToken };
+                var propertyNameList = propertyNameStrs.Split(tokens);
+                foreach (var propertyName in propertyNameList)
+                {
+                    Texture2D tex = mat.GetTexture(propertyName) as Texture2D;
+                    if (tex != null)
+                    {
+                        result.Add(tex);
+                        //UnityEngine.Debug.Log(string.Format("catch UIWidget shader texture2D ,textureName = {0}", tex.name));
+                    }
+                }
+            }
+
+            var mainTexture2D = mat.mainTexture as Texture2D;
+            if (mainTexture2D!=null && !result.Contains(mainTexture2D))
+            {
+                result.Add(mainTexture2D);
+                //UnityEngine.Debug.Log(string.Format("catch UIWidget shader texture2D ,textureName = {0}", mat.mainTexture.name));
+            }
+        }
+        return result;
+    }
+    public bool NetHandle_RequestStackData(eNetCmd cmd, UsCmd c)
+    {
+        int instanceID = c.ReadInt32();
+        string className = c.ReadString();
+        UnityEngine.Debug.Log(string.Format("NetHandle_RequestStackData instanceID={0} className={1}", instanceID, className));
+
+        ResourceRequestInfo requestInfo = ResourceTracker.Instance.GetAllocInfo(instanceID);
+
+        UsCmd pkt = new UsCmd();
+        pkt.WriteNetCmd(eNetCmd.SV_QueryStacksResponse);
+        if (requestInfo == null)
+            pkt.WriteString("<no_callstack_available>");
+        else
+            pkt.WriteString(ResourceTracker.Instance.GetStackTrace(requestInfo));
+        UsNet.Instance.SendCommand(pkt);
+        return true;
+    }
+
 
     private void TrackRequestWithObject(ResourceRequestInfo req, UnityEngine.Object obj)
     {

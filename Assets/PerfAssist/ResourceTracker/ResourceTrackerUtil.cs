@@ -1,10 +1,6 @@
-﻿using UnityEngine;
-using System.Collections;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
-using System.Text;
-
+using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -22,16 +18,36 @@ public class SysUtil
     }
 }
 
+public delegate List<UnityEngine.Object> AdditionalMemObjectExtractor(GameObject go);
+
 public class SceneGraphExtractor
 {
     public UnityEngine.Object m_root;
     public List<int> GameObjectIDs = new List<int>();
-    public List<int> TextureIDs = new List<int>();
-    public List<int> AnimationClipIDs = new List<int>();
 
     public static List<string> MemCategories = new List<string>() { "Texture2D", "AnimationClip", "Mesh", "Font", "ParticleSystem", "Camera" };
+    public static AdditionalMemObjectExtractor UIWidgetExtractor;
 
     public Dictionary<string, List<int>> MemObjectIDs = new Dictionary<string, List<int>>();
+
+    void CountMemObject(UnityEngine.Object obj)
+    {
+        List<int> ids = null;
+        if (obj != null && MemObjectIDs.TryGetValue(obj.GetType().Name, out ids))
+        {
+            if (ids != null && !ids.Contains(obj.GetInstanceID()))
+                ids.Add(obj.GetInstanceID());
+        }
+    }
+
+    void ExtractComponentIDs<T>(GameObject go) where T : Component
+    {
+        Component[] cameras = go.GetComponentsInChildren(typeof(T), true);
+        foreach (T comp in cameras)
+        {
+            CountMemObject(comp);
+        }
+    }
 
     public SceneGraphExtractor(UnityEngine.Object root)
     {
@@ -44,6 +60,8 @@ public class SceneGraphExtractor
         if (go != null)
         {
             ProcessRecursively(go);
+
+            ExtractComponentIDs<Camera>(go);
 
 #if UNITY_EDITOR
             Component[] renderers = go.GetComponentsInChildren(typeof(Renderer), true);
@@ -59,17 +77,37 @@ public class SceneGraphExtractor
                     }
                 }
             }
-
-            Component[] cameras = go.GetComponentsInChildren(typeof(Camera), true);
-            foreach (Camera camera in cameras)
+#else
+            if (UIWidgetExtractor != null)
             {
-                List<int> ids = null;
-                if (camera != null && MemObjectIDs.TryGetValue("Camera", out ids))
+                List<UnityEngine.Object> objs = UIWidgetExtractor(go);
+                foreach (var obj in objs)
                 {
-                    if (ids != null && !ids.Contains(camera.GetInstanceID()))
-                        ids.Add(camera.GetInstanceID());
+                    CountMemObject(obj);
                 }
             }
+
+            foreach (MeshFilter meshFilter in go.GetComponentsInChildren(typeof(MeshFilter), true))
+            {
+                Mesh mesh = meshFilter.sharedMesh;
+                CountMemObject(mesh);
+            }
+
+            foreach (Renderer renderer in go.GetComponentsInChildren(typeof(Renderer), true))
+            {
+                if(renderer.sharedMaterial!=null)
+                {
+                    CountMemObject(renderer.sharedMaterial);
+
+                    var txtures = ResourceTracker.Instance.GetTexture2DObjsFromMaterial(renderer.sharedMaterial);
+                    foreach (var txture in txtures)
+                    {
+                        CountMemObject(txture);
+                    }
+                }
+            }
+            ExtractComponentIDs<Animator>(go);
+            ExtractComponentIDs<ParticleSystem>(go);
 #endif
         }
     }
