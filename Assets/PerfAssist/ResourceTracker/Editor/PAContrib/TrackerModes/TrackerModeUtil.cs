@@ -71,11 +71,318 @@ public static class TrackerModeUtil
 
         if (!TrackerModeUtil.SaveSnapshotBin(targetDir, targetName + TrackerModeConsts.SnapshotBinPostfix, packed))
             return false;
-        if (!TrackerModeUtil.SaveSnapshotJson(targetDir, targetName + TrackerModeConsts.SnapshotJsonPostfix, unpacked))
-            return false;
+        /*if (!TrackerModeUtil.SaveSnapshotJson(targetDir, targetName + TrackerModeConsts.SnapshotJsonPostfix, unpacked))
+            return false;*/
 
         Debug.LogFormat("Snapshot saved successfully. (dir: {0}, name: {1})", targetDir, targetName);
         return true;
+    }
+
+    public static PackedMemorySnapshot LoadSnapshotBin(Stream stream)
+    {
+        System.Reflection.ConstructorInfo ci = typeof(PackedMemorySnapshot).GetConstructor(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic, null, new Type[0], new System.Reflection.ParameterModifier[0]);
+        PackedMemorySnapshot packed = ci.Invoke(null) as PackedMemorySnapshot;
+        BinaryReader br = new BinaryReader(stream);
+        stream.Position += 8;
+        MemUtil.LoadSnapshotProgress(0, "Loading Connection");
+        float prog = 0;
+        float lastProg = 0;
+
+        var len = br.ReadInt32();
+        var connctions = new Connection[len];
+        System.Reflection.FieldInfo fi = typeof(PackedMemorySnapshot).GetField("m_Connections", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        fi.SetValue(packed, connctions);
+
+        for (int i = 0; i < len; i++)
+        {
+            Connection c = new Connection();
+            c.from = br.ReadInt32();
+            c.to = br.ReadInt32();
+            prog = ((float)i / len) * 0.15f;
+            if (prog - lastProg > 0.01)
+            {
+                MemUtil.LoadSnapshotProgress(prog, string.Format("Loading Connction {0}/{1}", i + 1, len));
+                lastProg = prog;
+            }
+            connctions[i] = c;
+        }
+
+        len = br.ReadInt32();
+        PackedGCHandle[] handles = new PackedGCHandle[len];
+        fi = typeof(PackedMemorySnapshot).GetField("m_GcHandles", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        fi.SetValue(packed, handles);
+        System.Reflection.FieldInfo[] fis = new System.Reflection.FieldInfo[]
+        {
+            typeof(PackedGCHandle).GetField("m_Target", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        };
+
+        for (int i = 0; i < len; i++)
+        {
+            object h = new PackedGCHandle();
+            
+            var target = br.ReadUInt64();
+            fi = fis[0];
+            fi.SetValue(h, target);
+
+            prog = 0.15f + ((float)i / len) * 0.15f;
+            if (prog - lastProg > 0.01)
+            {
+                MemUtil.LoadSnapshotProgress(prog, string.Format("Loading GCHandles {0}/{1}", i + 1, len));
+                lastProg = prog;
+            }
+            handles[i] = (PackedGCHandle)h;
+        }
+
+        len = br.ReadInt32();
+        MemorySection[] managedHeap = new MemorySection[len];
+        fi = typeof(PackedMemorySnapshot).GetField("m_ManagedHeapSections", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        fi.SetValue(packed, managedHeap);
+
+        fis = new System.Reflection.FieldInfo[]
+        {
+           typeof(MemorySection).GetField("m_Bytes", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(MemorySection).GetField("m_StartAddress", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        };
+        for (int i = 0; i < len; i++)
+        {
+            object h = new MemorySection();
+            var bLen = br.ReadInt32();
+            var bytes = br.ReadBytes(bLen);
+            var startAddress = br.ReadUInt64();
+            fi = fis[0];
+            fi.SetValue(h, bytes);
+
+            fi = fis[1];
+            fi.SetValue(h, startAddress);
+
+            prog = 0.3f + ((float)i / len) * 0.15f;
+            if (prog - lastProg > 0.01)
+            {
+                MemUtil.LoadSnapshotProgress(prog, string.Format("Loading Managed Heap {0}/{1}", i + 1, len));
+                lastProg = prog;
+            }
+            managedHeap[i] = (MemorySection)h;
+            if (managedHeap[i].bytes == null)
+            {
+                UnityEngine.Debug.Log("ff");
+            }
+        }
+
+        len = br.ReadInt32();
+        PackedNativeUnityEngineObject[] nativeObj = new PackedNativeUnityEngineObject[len];
+        fi = typeof(PackedMemorySnapshot).GetField("m_NativeObjects", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        fi.SetValue(packed, nativeObj);
+
+        fis = new System.Reflection.FieldInfo[]
+        {
+           typeof(PackedNativeUnityEngineObject).GetField("m_ClassId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(PackedNativeUnityEngineObject).GetField("m_HideFlags", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(PackedNativeUnityEngineObject).GetField("m_InstanceId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(PackedNativeUnityEngineObject).GetField("m_Flags", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(PackedNativeUnityEngineObject).GetField("m_Name", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(PackedNativeUnityEngineObject).GetField("m_NativeObjectAddress", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(PackedNativeUnityEngineObject).GetField("m_Size", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        };
+        for (int i = 0; i < len; i++)
+        {
+            object obj = new PackedNativeUnityEngineObject();
+            int clsID = br.ReadInt32();
+            HideFlags hideFlags = (HideFlags)br.ReadByte();
+            int instanceID = br.ReadInt32();
+            var ft = typeof(PackedNativeUnityEngineObject).GetNestedType("ObjectFlags", System.Reflection.BindingFlags.NonPublic);
+            int flags = 0;
+            if (br.ReadBoolean())
+                flags |= 1;
+            if (br.ReadBoolean())
+                flags |= 4;
+            if (br.ReadBoolean())
+                flags |= 2;
+            object flag = Enum.ToObject(ft, flags);
+            string name = null;
+            if (br.ReadBoolean())
+            {
+                name = br.ReadString();
+            }
+            long nativeAddress = br.ReadInt64();
+            int size = br.ReadInt32();
+
+            fi = fis[0];
+            fi.SetValue(obj, clsID);
+
+            fi = fis[1];
+            fi.SetValue(obj, hideFlags);
+
+            fi = fis[2];
+            fi.SetValue(obj, instanceID);
+
+            fi = fis[3];
+            fi.SetValue(obj, flag);
+
+            fi = fis[4];
+            fi.SetValue(obj, name);
+
+            fi = fis[5];
+            fi.SetValue(obj, nativeAddress);
+
+            fi = fis[6];
+            fi.SetValue(obj, size);
+
+            prog = 0.45f + ((float)i / len) * 0.15f;
+            if (prog - lastProg > 0.01)
+            {
+                MemUtil.LoadSnapshotProgress(prog, string.Format("Loading Native Objects {0}/{1}", i + 1, len));
+                lastProg = prog;
+            }
+            nativeObj[i] = (PackedNativeUnityEngineObject)obj;
+        }
+
+        len = br.ReadInt32();
+        PackedNativeType[] nativeTypes = new PackedNativeType[len];
+        fi = typeof(PackedMemorySnapshot).GetField("m_NativeTypes", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        fi.SetValue(packed, nativeTypes);
+        fis = new System.Reflection.FieldInfo[]
+        {
+           typeof(PackedNativeType).GetField("m_BaseClassId", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(PackedNativeType).GetField("m_Name", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+        };
+        for (int i = 0; i < len; i++)
+        {
+            object t = new PackedNativeType();
+            int baseClassId = br.ReadInt32();
+            string name = null;
+            if (br.ReadBoolean())
+                name = br.ReadString();
+
+            fi = fis[0];
+            fi.SetValue(t, baseClassId);
+
+            fi = fis[1];
+            fi.SetValue(t, name);
+
+            prog = 0.6f + ((float)i / len) * 0.15f;
+            if (prog - lastProg > 0.01)
+            {
+                MemUtil.LoadSnapshotProgress(prog, string.Format("Loading Native Types {0}/{1}", i + 1, len));
+                lastProg = prog;
+            }
+            nativeTypes[i] = (PackedNativeType)t;
+        }
+
+        len = br.ReadInt32();
+        TypeDescription[] typeDesc = new TypeDescription[len];
+        fi = typeof(PackedMemorySnapshot).GetField("m_TypeDescriptions", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        fi.SetValue(packed, typeDesc);
+        fis = new System.Reflection.FieldInfo[]
+        {
+           typeof(TypeDescription).GetField("m_Assembly", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(TypeDescription).GetField("m_BaseOrElementTypeIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(TypeDescription).GetField("m_Fields", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(TypeDescription).GetField("m_Flags", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(TypeDescription).GetField("m_Name", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(TypeDescription).GetField("m_Size", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(TypeDescription).GetField("m_StaticFieldBytes", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(TypeDescription).GetField("m_TypeIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(TypeDescription).GetField("m_TypeInfoAddress", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+        };
+        var fis2 = new System.Reflection.FieldInfo[]
+         {
+           typeof(FieldDescription).GetField("m_IsStatic", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(FieldDescription).GetField("m_Name", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(FieldDescription).GetField("m_Offset", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(FieldDescription).GetField("m_TypeIndex", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+         };
+        for (int i = 0; i < len; i++)
+        {
+            object t = new TypeDescription();
+            int flags = br.ReadInt32() << 0x10;
+            string assembly = br.ReadString();
+            int baseOrElementTypeIndex = br.ReadInt32();
+            int fLen = br.ReadInt32();
+            FieldDescription[] fields = new FieldDescription[fLen];
+            for(int j = 0; j < fLen; j++)
+            {
+                object f = new FieldDescription();
+                bool isStatic = br.ReadBoolean();
+                string fname = br.ReadString();
+                int offset = br.ReadInt32();
+                int ftypeIndex = br.ReadInt32();
+
+                fi = fis2[0];
+                fi.SetValue(f, isStatic);
+
+                fi = fis2[1];
+                fi.SetValue(f, fname);
+
+                fi = fis2[2];
+                fi.SetValue(f, offset);
+
+                fi = fis2[3];
+                fi.SetValue(f, ftypeIndex);
+                fields[j] = (FieldDescription)f;
+            }
+
+            if (br.ReadBoolean())
+                flags |= 2;
+            if (br.ReadBoolean())
+                flags |= 1;
+
+            string name = br.ReadString();
+            int size = br.ReadInt32();
+            byte[] staticField = br.ReadBytes(br.ReadInt32());
+            int typeIndex = br.ReadInt32();
+            ulong typeAddress = br.ReadUInt64();
+
+            fi = fis[0];
+            fi.SetValue(t, assembly);
+            fi = fis[1];
+            fi.SetValue(t, baseOrElementTypeIndex);
+            fi = fis[2];
+            fi.SetValue(t, fields);
+            fi = fis[3];
+            fi.SetValue(t, Enum.ToObject(typeof(TypeDescription).GetNestedType("TypeFlags", System.Reflection.BindingFlags.NonPublic), flags));
+            fi = fis[4];
+            fi.SetValue(t, name);
+            fi = fis[5];
+            fi.SetValue(t, size);
+            fi = fis[6];
+            fi.SetValue(t, staticField);
+            fi = fis[7];
+            fi.SetValue(t, typeIndex);
+            fi = fis[8];
+            fi.SetValue(t, typeAddress);
+
+            prog = 0.75f + ((float)i / len) * 0.15f;
+            if (prog - lastProg > 0.01)
+            {
+                MemUtil.LoadSnapshotProgress(prog, string.Format("Loading Type Definitions {0}/{1}", i + 1, len));
+                lastProg = prog;
+            }
+            typeDesc[i] = (TypeDescription)t;
+        }
+
+        object vminfo = new VirtualMachineInformation();
+        fis = new System.Reflection.FieldInfo[]
+        {
+           typeof(VirtualMachineInformation).GetField("m_AllocationGranularity", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(VirtualMachineInformation).GetField("m_ArrayBoundsOffsetInHeader", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(VirtualMachineInformation).GetField("m_ArrayHeaderSize", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(VirtualMachineInformation).GetField("m_ArraySizeOffsetInHeader", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(VirtualMachineInformation).GetField("m_ObjectHeaderSize", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+           typeof(VirtualMachineInformation).GetField("m_PointerSize", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic),
+        };
+
+        fis[0].SetValue(vminfo, br.ReadInt32());
+        fis[1].SetValue(vminfo, br.ReadInt32());
+        fis[2].SetValue(vminfo, br.ReadInt32());
+        fis[3].SetValue(vminfo, br.ReadInt32());
+        int version = br.ReadInt32();
+        fis[4].SetValue(vminfo, br.ReadInt32());
+        fis[5].SetValue(vminfo, br.ReadInt32());
+        fi = typeof(PackedMemorySnapshot).GetField("m_VirtualMachineInformation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+        fi.SetValue(packed, vminfo);
+        MemUtil.LoadSnapshotProgress(1f, "done");
+        
+        return packed;
     }
 
     public static bool SaveSnapshotBin(string binFilePath, string binFileName,PackedMemorySnapshot packed)
@@ -89,7 +396,6 @@ public static class TrackerModeUtil
                 {
                     BinaryWriter bw = new BinaryWriter(stream);
                     bw.Write(System.Text.Encoding.ASCII.GetBytes("MEMSNAP\0"));
-                    bw.Write(packed.connections.Length);
                     var connctions = packed.connections;
                     MemUtil.LoadSnapshotProgress(0, "Saving Connection");
                     float prog = 0;
@@ -130,6 +436,8 @@ public static class TrackerModeUtil
 
                     var managedHeap = packed.managedHeapSections;
                     len = managedHeap.Length;
+                    bw.Write(len);
+
                     for (int i = 0; i < len; i++)
                     {
                         var h = managedHeap[i];
@@ -147,6 +455,7 @@ public static class TrackerModeUtil
 
                     var nativeObj = packed.nativeObjects;
                     len = nativeObj.Length;
+                    bw.Write(len);
 
                     for (int i = 0; i < len; i++)
                     {
@@ -173,6 +482,7 @@ public static class TrackerModeUtil
 
                     var nativeTypes = packed.nativeTypes;
                     len = nativeTypes.Length;
+                    bw.Write(len);
 
                     for (int i = 0; i < len; i++)
                     {
@@ -192,6 +502,7 @@ public static class TrackerModeUtil
 
                     var typeDesc = packed.typeDescriptions;
                     len = typeDesc.Length;
+                    bw.Write(len);
 
                     for (int i = 0; i < len; i++)
                     {

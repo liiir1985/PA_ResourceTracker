@@ -35,7 +35,7 @@ public class TrackerMode_File : TrackerMode_Base
                 {
                     using (Stream stream = File.Open(fileName, FileMode.Open))
                     {
-                        packeds.Add(bf.Deserialize(stream));
+                        packeds.Add(TrackerModeUtil.LoadSnapshotBin(stream));
                     }
                 }
             }
